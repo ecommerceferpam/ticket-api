@@ -1,20 +1,29 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import requests
 from bs4 import BeautifulSoup
 import os
 
 app = Flask(__name__)
 
+# Dados do usuário
 LOGIN_URL = "https://widecommerce.freshdesk.com/support/login"
 TICKET_URL = "https://widecommerce.freshdesk.com/support/tickets/new"
 SUBMIT_URL = "https://widecommerce.freshdesk.com/support/tickets"
 
-# Credenciais fixas
-EMAIL = os.getenv("FRESHDESK_EMAIL")
-SENHA = os.getenv("FRESHDESK_PASSWORD")
+EMAIL = os.getenv("EMAIL")  # Use variável de ambiente para não expor a senha
+SENHA = os.getenv("SENHA")  # Use variável de ambiente para não expor a senha
 
+# Dados do ticket
+TICKET_EMAIL = "suporte.ecom@ferpam.com.br"
+TICKET_SUBJECT = "teste"
+TICKET_PRIORITY = "1"  # 1: Baixa, 2: Média, 3: Alta, 4: Urgente
+TICKET_DESCRIPTION = "Detalhes da ocorrência: teste."
 
-def login(session):
+# Sessão
+session = requests.Session()
+
+# 1. Login
+def login():
     resp = session.get(LOGIN_URL)
     soup = BeautifulSoup(resp.text, 'html.parser')
     token = soup.find("input", {"name": "authenticity_token"})['value']
@@ -27,13 +36,14 @@ def login(session):
     }
 
     r = session.post(LOGIN_URL, data=payload)
-    return "logout" in r.text or "Novo ticket" in r.text
+    if "logout" in r.text or "Novo ticket" in r.text:
+        print("✅ Login realizado com sucesso.")
+    else:
+        print("❌ Falha no login.")
+        exit()
 
-def criar_ticket(ticket_email, ticket_subject, ticket_priority, ticket_description):
-    session = requests.Session()
-    if not login(session):
-        return {"status": "erro", "mensagem": "Login falhou"}
-
+# 2. Criar ticket
+def criar_ticket():
     r = session.get(TICKET_URL)
     soup = BeautifulSoup(r.text, 'html.parser')
     token = soup.find("input", {"name": "authenticity_token"})['value']
@@ -41,38 +51,28 @@ def criar_ticket(ticket_email, ticket_subject, ticket_priority, ticket_descripti
     payload = {
         "utf8": "✓",
         "authenticity_token": token,
-        "helpdesk_ticket[email]": ticket_email,
-        "helpdesk_ticket[subject]": ticket_subject,
-        "helpdesk_ticket[priority]": ticket_priority,
-        "helpdesk_ticket[ticket_body_attributes][description_html]": ticket_description
+        "helpdesk_ticket[email]": TICKET_EMAIL,
+        "helpdesk_ticket[subject]": TICKET_SUBJECT,
+        "helpdesk_ticket[priority]": TICKET_PRIORITY,
+        "helpdesk_ticket[ticket_body_attributes][description_html]": TICKET_DESCRIPTION
     }
 
-    response = session.post(SUBMIT_URL, data=payload, allow_redirects=True)
+    response = session.post(SUBMIT_URL, data=payload)
+    if "ticket" in response.url or "Obrigado" in response.text:
+        print("✅ Ticket enviado com sucesso.")
+    else:
+        print("❌ Falha ao enviar o ticket.")
+        print(response.text)
 
-    ticket_id = None
-    if "tickets" in response.url:
-        parts = response.url.rstrip('/').split('/')
-        if parts[-1].isdigit():
-            ticket_id = parts[-1]
-
-    return {
-        "status": "sucesso" if ticket_id else "erro",
-        "ticket_id": ticket_id,
-        "url": response.url
-    }
-
+# Rota da aplicação
 @app.route("/criar_ticket", methods=["GET"])
-def api_criar_ticket():
-    email = request.args.get("email")
-    subject = request.args.get("subject")
-    priority = request.args.get("priority", "1")
-    description = request.args.get("description", "")
+def criar_ticket_route():
+    login()
+    criar_ticket()
+    return "✅ Ticket Criado com Sucesso!"
 
-    if not all([email, subject]):
-        return jsonify({"erro": "Parâmetros obrigatórios: email, subject"})
-
-    resultado = criar_ticket(email, subject, priority, description)
-    return jsonify(resultado)
-
+# Execução
 if __name__ == "__main__":
-    app.run()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
